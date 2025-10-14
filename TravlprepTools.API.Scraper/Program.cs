@@ -81,23 +81,20 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = string.Empty; // Set Swagger UI at app root
 });
 
-// Serve static files from downloaded_images folder
-var imageDownloadPath = builder.Configuration["ImageDownloadPath"] ?? "downloaded_images";
-var fullImagePath = Path.Combine(Directory.GetCurrentDirectory(), imageDownloadPath);
-
-// Ensure the directory exists
-if (!Directory.Exists(fullImagePath))
-{
-    Directory.CreateDirectory(fullImagePath);
-    var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("Created downloaded_images directory: {Path}", fullImagePath);
-}
-
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(fullImagePath),
-    RequestPath = "/images"
-});
+// Note: Static file serving for images is disabled since we're not downloading images by default
+// If image downloading is re-enabled, uncomment the lines below:
+//
+// var imageDownloadPath = builder.Configuration["ImageDownloadPath"] ?? "downloaded_images";
+// var fullImagePath = Path.Combine(Directory.GetCurrentDirectory(), imageDownloadPath);
+// if (!Directory.Exists(fullImagePath))
+// {
+//     Directory.CreateDirectory(fullImagePath);
+// }
+// app.UseStaticFiles(new StaticFileOptions
+// {
+//     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(fullImagePath),
+//     RequestPath = "/images"
+// });
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");

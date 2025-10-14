@@ -17,9 +17,6 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-# Create the downloaded_images directory
-RUN mkdir -p /app/downloaded_images
-
 # Install dependencies for Puppeteer (Chrome/Chromium)
 RUN apt-get update && apt-get install -y \
     wget \
