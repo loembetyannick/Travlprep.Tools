@@ -12,7 +12,8 @@ builder.Services.AddCors(options =>
                 "http://localhost:3000", 
                 "http://localhost:3001",
                 "https://*.railway.app",
-                "https://*.up.railway.app")
+                "https://*.up.railway.app",
+                "https://travlprep-tools.vercel.app")
               .SetIsOriginAllowedToAllowWildcardSubdomains()
               .AllowAnyHeader()
               .AllowAnyMethod();
