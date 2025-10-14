@@ -1,0 +1,113 @@
+@TravlprepTools.API.Scraper_HostAddress = http://localhost:5228
+
+### ⭐ EASIEST METHOD - Plain Text (Just Paste Your List - NO JSON!)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch/text
+Content-Type: text/plain
+
+Snow mobile safari
+Santa Claus village
+Huski sleigh
+Northern lights observation
+Reindeer sleigh
+Arcanedia adventure park
+Fox fires artic spa
+Feed the reindeers
+Panoramic spa jaccuzzi
+Guided snow shoeing
+Snow karting
+Snow tabboggining
+Glass igloo hotel
+
+### Plain Text With Extension (adds "arctic finland" to each)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch/text?extension=arctic finland&count=20
+Content-Type: text/plain
+
+Snow mobile safari
+Santa Claus village
+Huski sleigh
+Northern lights observation
+Reindeer sleigh
+Arcanedia adventure park
+Fox fires artic spa
+Feed the reindeers
+Panoramic spa jaccuzzi
+Guided snow shoeing
+Snow karting
+Snow tabboggining
+Glass igloo hotel
+
+### ⭐ DOWNLOAD IMAGES LOCALLY (Solves Access Denied!)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch/text?extension=lapland&count=20&downloadImages=true
+Content-Type: text/plain
+
+Snow mobile safari
+Santa Claus village
+Glass igloo hotel
+
+### Batch Scrape Pinterest - Simple Multi-Line Format (Just Paste Your List!)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch
+Content-Type: application/json
+
+{
+  "queriesText": "Snow mobile safari\nSanta Claus village\nHuski sleigh\nNorthern lights observation\nReindeer sleigh\nArcanedia adventure park\nFox fires artic spa\nFeed the reindeers\nPanoramic spa jaccuzzi\nGuided snow shoeing\nSnow karting\nSnow tabboggining\nGlass igloo hotel",
+  "countPerQuery": 20
+}
+
+### Batch Scrape Pinterest - With Extension (adds "arctic finland" to each query)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch
+Content-Type: application/json
+
+{
+  "queriesText": "Snow mobile safari\nSanta Claus village\nHuski sleigh\nNorthern lights observation\nReindeer sleigh\nArcanedia adventure park\nFox fires artic spa\nFeed the reindeers\nPanoramic spa jaccuzzi\nGuided snow shoeing\nSnow karting\nSnow tabboggining\nGlass igloo hotel",
+  "extension": "arctic finland",
+  "countPerQuery": 20
+}
+
+### Batch Scrape Pinterest - Old Array Format (Still Works!)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest/batch
+Content-Type: application/json
+
+{
+  "queries": [
+    "Snow mobile safari",
+    "Santa Claus village",
+    "Glass igloo hotel"
+  ],
+  "extension": "winter activities",
+  "countPerQuery": 20
+}
+
+### Scrape Pinterest for Top 20 High-Quality Travel Images (1080p+)
+GET {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest?query=travel&count=20
+Accept: application/json
+
+### Scrape Pinterest for Food Images (GET)
+GET {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest?query=food&count=15
+Accept: application/json
+
+### Scrape Pinterest for Nature Images (POST)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/pinterest
+Content-Type: application/json
+
+{
+  "query": "nature",
+  "count": 20
+}
+
+### Scrape Google
+GET {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/google
+Accept: application/json
+
+### Scrape Custom URL (Query Parameter)
+GET {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/url?url=https://www.google.com
+Accept: application/json
+
+### Scrape Custom URL (POST)
+POST {{TravlprepTools.API.Scraper_HostAddress}}/api/scraper/scrape
+Content-Type: application/json
+
+{
+  "url": "https://www.google.com"
+}
+
+###
