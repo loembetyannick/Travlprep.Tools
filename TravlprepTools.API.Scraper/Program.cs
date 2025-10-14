@@ -8,7 +8,12 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:3001")
+        policy.WithOrigins(
+                "http://localhost:3000", 
+                "http://localhost:3001",
+                "https://*.railway.app",
+                "https://*.up.railway.app")
+              .SetIsOriginAllowedToAllowWildcardSubdomains()
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -68,15 +73,13 @@ catch (Exception ex)
 }
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Enable Swagger in all environments for Railway deployment
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(options =>
-    {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Scraper API V1");
-        options.RoutePrefix = string.Empty; // Set Swagger UI at app root
-    });
-}
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Scraper API V1");
+    options.RoutePrefix = string.Empty; // Set Swagger UI at app root
+});
 
 // Serve static files from downloaded_images folder
 var imageDownloadPath = builder.Configuration["ImageDownloadPath"] ?? "downloaded_images";
