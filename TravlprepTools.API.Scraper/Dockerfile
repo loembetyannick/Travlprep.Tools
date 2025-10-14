@@ -5,10 +5,9 @@ EXPOSE 8081
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
-COPY ["TravlprepTools.API.Scraper/TravlprepTools.API.Scraper.csproj", "TravlprepTools.API.Scraper/"]
-RUN dotnet restore "TravlprepTools.API.Scraper/TravlprepTools.API.Scraper.csproj"
+COPY ["TravlprepTools.API.Scraper.csproj", "./"]
+RUN dotnet restore "TravlprepTools.API.Scraper.csproj"
 COPY . .
-WORKDIR "/src/TravlprepTools.API.Scraper"
 RUN dotnet build "TravlprepTools.API.Scraper.csproj" -c Release -o /app/build
 
 FROM build AS publish
