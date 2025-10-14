@@ -1,13 +1,16 @@
 using PuppeteerSharp;
+using System.Collections.Concurrent;
 
 namespace TravlprepTools.API.Scraper.Services;
 
-public class ScraperService : IScraperService
+public class ScraperService : IScraperService, IDisposable
 {
     private static bool _browserDownloaded = false;
     private static readonly SemaphoreSlim _downloadLock = new(1, 1);
     private readonly ILogger<ScraperService> _logger;
     private readonly IImageDownloadService _imageDownloadService;
+    private readonly ConcurrentBag<IBrowser> _activeBrowsers = new();
+    private bool _disposed = false;
 
     public ScraperService(ILogger<ScraperService> logger, IImageDownloadService imageDownloadService)
     {
@@ -42,13 +45,17 @@ public class ScraperService : IScraperService
 
             _logger.LogInformation("Launching browser for URL: {Url}", url);
 
-            await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
+            var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
                 Headless = true,
                 Args = new[] { "--no-sandbox", "--disable-setuid-sandbox" }
             });
 
-            await using var page = await browser.NewPageAsync();
+            _activeBrowsers.Add(browser);
+
+            try
+            {
+                await using var page = await browser.NewPageAsync();
             
             await page.GoToAsync(url, new NavigationOptions
             {
@@ -56,20 +63,25 @@ public class ScraperService : IScraperService
                 Timeout = 30000
             });
 
-            var title = await page.GetTitleAsync();
-            var content = await page.GetContentAsync();
+                var title = await page.GetTitleAsync();
+                var content = await page.GetContentAsync();
 
-            _logger.LogInformation("Successfully scraped {Url}", url);
+                _logger.LogInformation("Successfully scraped {Url}", url);
 
-            return new ScraperResult
+                return new ScraperResult
+                {
+                    Url = page.Url,
+                    Title = title,
+                    Content = content,
+                    ContentLength = content.Length,
+                    Success = true,
+                    ScrapedAt = DateTime.UtcNow
+                };
+            }
+            finally
             {
-                Url = page.Url,
-                Title = title,
-                Content = content,
-                ContentLength = content.Length,
-                Success = true,
-                ScrapedAt = DateTime.UtcNow
-            };
+                await browser.DisposeAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -110,7 +122,7 @@ public class ScraperService : IScraperService
 
             _logger.LogInformation("Scraping Pinterest for query: {Query}", searchQuery);
 
-            await using var browser = await Puppeteer.LaunchAsync(new LaunchOptions
+            var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
                 Headless = true,
                 Args = new[] 
@@ -121,7 +133,11 @@ public class ScraperService : IScraperService
                 }
             });
 
-            await using var page = await browser.NewPageAsync();
+            _activeBrowsers.Add(browser);
+
+            try
+            {
+                await using var page = await browser.NewPageAsync();
             
             // Set user agent to avoid detection
             await page.SetUserAgentAsync("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
@@ -275,44 +291,49 @@ public class ScraperService : IScraperService
             var finalImages = sortedImages.Take(imageCount).ToList();
             _logger.LogInformation("Selected top {Count} highest quality images", finalImages.Count);
 
-            // Download images if requested
-            if (downloadImages)
-            {
-                _logger.LogInformation("Downloading {Count} images locally...", finalImages.Count);
-                
-                for (int i = 0; i < finalImages.Count; i++)
+                // Download images if requested
+                if (downloadImages)
                 {
-                    var image = finalImages[i];
-                    var localPath = await _imageDownloadService.DownloadImageAsync(image.ImageUrl, searchQuery, i + 1);
+                    _logger.LogInformation("Downloading {Count} images locally...", finalImages.Count);
                     
-                    // Convert file path to URL path for serving through API
-                    string? localUrl = null;
-                    if (localPath != null)
+                    for (int i = 0; i < finalImages.Count; i++)
                     {
-                        var fileName = Path.GetFileName(localPath);
-                        localUrl = $"/images/{fileName}";
+                        var image = finalImages[i];
+                        var localPath = await _imageDownloadService.DownloadImageAsync(image.ImageUrl, searchQuery, i + 1);
+                        
+                        // Convert file path to URL path for serving through API
+                        string? localUrl = null;
+                        if (localPath != null)
+                        {
+                            var fileName = Path.GetFileName(localPath);
+                            localUrl = $"/images/{fileName}";
+                        }
+                        
+                        // Update the image with local file path and use local URL as the main image URL
+                        finalImages[i] = image with 
+                        { 
+                            ImageUrl = localUrl ?? image.ImageUrl, // Use local URL if available
+                            LocalFilePath = localPath,
+                            Downloaded = localPath != null
+                        };
                     }
                     
-                    // Update the image with local file path and use local URL as the main image URL
-                    finalImages[i] = image with 
-                    { 
-                        ImageUrl = localUrl ?? image.ImageUrl, // Use local URL if available
-                        LocalFilePath = localPath,
-                        Downloaded = localPath != null
-                    };
+                    _logger.LogInformation("Downloaded {Count} images successfully", finalImages.Count(i => i.Downloaded));
                 }
-                
-                _logger.LogInformation("Downloaded {Count} images successfully", finalImages.Count(i => i.Downloaded));
-            }
 
-            return new PinterestResult
+                return new PinterestResult
+                {
+                    SearchQuery = searchQuery,
+                    Images = finalImages,
+                    ImageCount = finalImages.Count,
+                    Success = true,
+                    ScrapedAt = DateTime.UtcNow
+                };
+            }
+            finally
             {
-                SearchQuery = searchQuery,
-                Images = finalImages,
-                ImageCount = finalImages.Count,
-                Success = true,
-                ScrapedAt = DateTime.UtcNow
-            };
+                await browser.DisposeAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -394,6 +415,36 @@ public class ScraperService : IScraperService
                 ScrapedAt = DateTime.UtcNow
             };
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _logger.LogInformation("Disposing ScraperService and cleaning up {Count} active browser sessions", _activeBrowsers.Count);
+
+        // Clean up all active browsers
+        foreach (var browser in _activeBrowsers)
+        {
+            try
+            {
+                if (!browser.IsClosed)
+                {
+                    browser.CloseAsync().GetAwaiter().GetResult();
+                }
+                browser.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing browser instance");
+            }
+        }
+
+        _activeBrowsers.Clear();
+        _disposed = true;
+
+        _logger.LogInformation("ScraperService disposed successfully");
     }
 }
 
