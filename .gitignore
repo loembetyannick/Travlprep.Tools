@@ -1,0 +1,20 @@
+# .NET build outputs
+**/bin/
+**/obj/
+
+# PuppeteerSharp browser downloads
+**/Chrome/
+**/ChromeHeadlessShell/
+**/.local-chromium/
+
+# Downloaded images
+**/downloaded_images/
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Visual Studio
+.vs/
