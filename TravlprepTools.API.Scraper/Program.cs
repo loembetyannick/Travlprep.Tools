@@ -48,12 +48,57 @@ builder.Services.AddScoped<ICollageService, CollageService>();
 
 var app = builder.Build();
 
-// Clean up any orphaned browser processes from previous runs
+// Clean up any orphaned processes from previous runs
 try
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogInformation("Cleaning up any orphaned browser processes from previous runs...");
+    logger.LogInformation("Cleaning up any orphaned processes from previous runs...");
     
+    // Kill any process using port 5228
+    try
+    {
+        var lsofProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "/bin/sh",
+            Arguments = "-c \"lsof -ti :5228\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+        
+        if (lsofProcess != null)
+        {
+            lsofProcess.WaitForExit(2000);
+            var output = lsofProcess.StandardOutput.ReadToEnd().Trim();
+            
+            if (!string.IsNullOrEmpty(output))
+            {
+                var pids = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var pid in pids)
+                {
+                    logger.LogInformation($"Killing process {pid} using port 5228...");
+                    var killProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "kill",
+                        Arguments = $"-9 {pid}",
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                    killProcess?.WaitForExit(1000);
+                }
+                logger.LogInformation("Killed processes using port 5228");
+            }
+        }
+    }
+    catch (Exception portEx)
+    {
+        logger.LogWarning(portEx, "Could not kill process on port 5228 (it may not exist)");
+    }
+    
+    // Kill any orphaned browser processes
     var killChrome = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
     {
         FileName = "pkill",
@@ -70,7 +115,7 @@ try
 catch (Exception ex)
 {
     var logger = app.Services.GetRequiredService<ILogger<Program>>();
-    logger.LogWarning(ex, "Could not kill orphaned browser processes (they may not exist)");
+    logger.LogWarning(ex, "Could not complete startup cleanup");
 }
 
 // Configure the HTTP request pipeline.

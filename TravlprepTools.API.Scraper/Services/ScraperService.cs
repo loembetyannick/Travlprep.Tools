@@ -122,6 +122,26 @@ public class ScraperService : IScraperService, IDisposable
 
             _logger.LogInformation("Scraping Pinterest for query: {Query}", searchQuery);
 
+            // Kill any orphaned Chrome processes before launching
+            try
+            {
+                var killProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "pkill",
+                    Arguments = "-9 -f \"chrome\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                killProcess?.WaitForExit(1000);
+                await Task.Delay(500); // Give OS time to clean up
+            }
+            catch
+            {
+                // Ignore errors if no processes to kill
+            }
+
             var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
                 Headless = true,
@@ -129,8 +149,11 @@ public class ScraperService : IScraperService, IDisposable
                 { 
                     "--no-sandbox", 
                     "--disable-setuid-sandbox",
-                    "--disable-blink-features=AutomationControlled"
-                }
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu"
+                },
+                Timeout = 60000
             });
 
             _activeBrowsers.Add(browser);
@@ -332,7 +355,22 @@ public class ScraperService : IScraperService, IDisposable
             }
             finally
             {
-                await browser.DisposeAsync();
+                try
+                {
+                    if (!browser.IsClosed)
+                    {
+                        await browser.CloseAsync();
+                    }
+                    await browser.DisposeAsync();
+                    _activeBrowsers.TryTake(out _);
+                    
+                    // Give system time to fully clean up
+                    await Task.Delay(1000);
+                }
+                catch (Exception disposeEx)
+                {
+                    _logger.LogWarning(disposeEx, "Error disposing browser");
+                }
             }
         }
         catch (Exception ex)
@@ -352,11 +390,15 @@ public class ScraperService : IScraperService, IDisposable
     {
         try
         {
-            _logger.LogInformation("Starting PARALLEL batch Pinterest scraping for {Count} queries", searchQueries.Count);
+            _logger.LogInformation("Starting SEQUENTIAL batch Pinterest scraping for {Count} queries", searchQueries.Count);
 
-            // Create tasks for all queries to run in parallel
-            var scrapingTasks = searchQueries.Select(async (query, index) =>
+            var results = new List<QueryResult>();
+
+            // Process queries one by one sequentially
+            for (int index = 0; index < searchQueries.Count; index++)
             {
+                var query = searchQueries[index];
+                
                 try
                 {
                     _logger.LogInformation("Starting query {Index}/{Total}: {Query}", 
@@ -367,31 +409,36 @@ public class ScraperService : IScraperService, IDisposable
                     _logger.LogInformation("Completed query {Index}/{Total}: {Query} - {Count} images", 
                         index + 1, searchQueries.Count, query, result.Images.Count);
 
-                    return new QueryResult
+                    results.Add(new QueryResult
                     {
                         Query = query,
                         Images = result.Images,
                         ImageCount = result.Images.Count,
                         Success = result.Success,
                         Error = result.Error
-                    };
+                    });
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error scraping Pinterest for query: {Query}", query);
-                    return new QueryResult
+                    results.Add(new QueryResult
                     {
                         Query = query,
                         Images = new List<PinterestImage>(),
                         ImageCount = 0,
                         Success = false,
                         Error = ex.Message
-                    };
+                    });
                 }
-            }).ToList();
+                
+                // Add delay between queries for cleanup and to be respectful to the server
+                if (index < searchQueries.Count - 1)
+                {
+                    _logger.LogInformation("Waiting 3 seconds before next query...");
+                    await Task.Delay(3000); // 3 second delay between queries
+                }
+            }
 
-            // Wait for all scraping tasks to complete in parallel
-            var results = await Task.WhenAll(scrapingTasks);
             var totalImages = results.Sum(r => r.ImageCount);
 
             _logger.LogInformation("Batch scraping completed. Total images: {Total}", totalImages);
