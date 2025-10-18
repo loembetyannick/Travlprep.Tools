@@ -11,11 +11,69 @@ public class ScraperService : IScraperService, IDisposable
     private readonly IImageDownloadService _imageDownloadService;
     private readonly ConcurrentBag<IBrowser> _activeBrowsers = new();
     private bool _disposed = false;
+    
+    // Store cookies after login to reuse across sessions
+    private static CookieParam[]? _pinterestCookies = null;
+    private static DateTime _cookiesExpiry = DateTime.MinValue;
 
     public ScraperService(ILogger<ScraperService> logger, IImageDownloadService imageDownloadService)
     {
         _logger = logger;
         _imageDownloadService = imageDownloadService;
+    }
+
+    private async Task<bool> LoginToPinterestManuallyAsync(IPage page)
+    {
+        try
+        {
+            _logger.LogInformation("=== MANUAL LOGIN REQUIRED ===");
+            _logger.LogInformation("Please login to Pinterest in the browser window that just opened.");
+            _logger.LogInformation("You have 60 seconds to complete the login...");
+            _logger.LogInformation("Email: loembetyannick@gmail.com");
+            _logger.LogInformation("Password: Yolande123!");
+
+            // Go to Pinterest login page
+            await page.GoToAsync("https://www.pinterest.com/login/", new NavigationOptions
+            {
+                WaitUntil = new[] { WaitUntilNavigation.Networkidle0 },
+                Timeout = 60000
+            });
+
+            _logger.LogInformation("Login page loaded. Please complete the login manually in the browser window.");
+            
+            // Wait for user to complete login (check every 2 seconds for 60 seconds)
+            for (int i = 0; i < 30; i++)
+            {
+                await Task.Delay(2000);
+                var currentUrl = page.Url;
+                
+                // Check if we're logged in (not on login page anymore)
+                if (currentUrl.Contains("pinterest.com") && !currentUrl.Contains("/login"))
+                {
+                    _logger.LogInformation("✓ Login detected! Saving session cookies...");
+                    
+                    // Save cookies for reuse (valid for 24 hours)
+                    _pinterestCookies = await page.GetCookiesAsync();
+                    _cookiesExpiry = DateTime.UtcNow.AddHours(24);
+                    
+                    _logger.LogInformation("✓ Session saved! Will reuse for all queries.");
+                    return true;
+                }
+                
+                if (i % 5 == 0 && i > 0)
+                {
+                    _logger.LogInformation($"Still waiting for login... ({60 - (i * 2)} seconds remaining)");
+                }
+            }
+
+            _logger.LogWarning("Login timeout - continuing without login");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during manual login");
+            return false;
+        }
     }
 
     public async Task<ScraperResult> ScrapeUrlAsync(string url)
@@ -144,16 +202,17 @@ public class ScraperService : IScraperService, IDisposable
 
             var browser = await Puppeteer.LaunchAsync(new LaunchOptions
             {
-                Headless = true,
+                Headless = false, // Visible browser for login (Google might have security checks)
                 Args = new[] 
                 { 
                     "--no-sandbox", 
                     "--disable-setuid-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
-                    "--disable-gpu"
+                    "--start-maximized"
                 },
-                Timeout = 60000
+                Timeout = 60000,
+                DefaultViewport = null // Use full screen
             });
 
             _activeBrowsers.Add(browser);
@@ -388,13 +447,68 @@ public class ScraperService : IScraperService, IDisposable
 
     public async Task<BatchPinterestResult> ScrapePinterestBatchAsync(List<string> searchQueries, int imageCountPerQuery = 20, bool downloadImages = false)
     {
+        IBrowser? sharedBrowser = null;
+        
         try
         {
             _logger.LogInformation("Starting SEQUENTIAL batch Pinterest scraping for {Count} queries", searchQueries.Count);
 
+            // Ensure browser is downloaded (only once)
+            if (!_browserDownloaded)
+            {
+                await _downloadLock.WaitAsync();
+                try
+                {
+                    if (!_browserDownloaded)
+                    {
+                        _logger.LogInformation("Downloading Chromium browser...");
+                        var browserFetcher = new BrowserFetcher();
+                        await browserFetcher.DownloadAsync();
+                        _browserDownloaded = true;
+                        _logger.LogInformation("Chromium browser downloaded successfully");
+                    }
+                }
+                finally
+                {
+                    _downloadLock.Release();
+                }
+            }
+
+            // Launch ONE browser for all queries
+            _logger.LogInformation("Launching browser for batch scraping...");
+            
+            sharedBrowser = await Puppeteer.LaunchAsync(new LaunchOptions
+            {
+                Headless = false, // Visible for manual login
+                Args = new[] 
+                { 
+                    "--no-sandbox", 
+                    "--disable-setuid-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--start-maximized"
+                },
+                Timeout = 60000,
+                DefaultViewport = null
+            });
+
+            _activeBrowsers.Add(sharedBrowser);
+
+            // Login ONCE if we don't have cached cookies
+            if (_pinterestCookies == null || DateTime.UtcNow >= _cookiesExpiry)
+            {
+                var loginPage = await sharedBrowser.NewPageAsync();
+                await LoginToPinterestManuallyAsync(loginPage);
+                await loginPage.CloseAsync();
+            }
+            else
+            {
+                _logger.LogInformation("Using cached Pinterest session (valid until {Expiry})", _cookiesExpiry.ToLocalTime());
+            }
+
             var results = new List<QueryResult>();
 
-            // Process queries one by one sequentially
+            // Process queries one by one sequentially using the SAME browser
             for (int index = 0; index < searchQueries.Count; index++)
             {
                 var query = searchQueries[index];
@@ -404,7 +518,8 @@ public class ScraperService : IScraperService, IDisposable
                     _logger.LogInformation("Starting query {Index}/{Total}: {Query}", 
                         index + 1, searchQueries.Count, query);
 
-                    var result = await ScrapePinterestAsync(query, imageCountPerQuery, downloadImages);
+                    // Scrape using the shared browser and cookies
+                    var result = await ScrapePinterestWithBrowserAsync(sharedBrowser, query, imageCountPerQuery, downloadImages);
 
                     _logger.LogInformation("Completed query {Index}/{Total}: {Query} - {Count} images", 
                         index + 1, searchQueries.Count, query, result.Images.Count);
@@ -435,7 +550,7 @@ public class ScraperService : IScraperService, IDisposable
                 if (index < searchQueries.Count - 1)
                 {
                     _logger.LogInformation("Waiting 3 seconds before next query...");
-                    await Task.Delay(3000); // 3 second delay between queries
+                    await Task.Delay(3000);
                 }
             }
 
@@ -457,6 +572,227 @@ public class ScraperService : IScraperService, IDisposable
             _logger.LogError(ex, "Error in batch Pinterest scraping");
             return new BatchPinterestResult
             {
+                Success = false,
+                Error = ex.Message,
+                ScrapedAt = DateTime.UtcNow
+            };
+        }
+        finally
+        {
+            // Close the shared browser after all queries are done
+            if (sharedBrowser != null)
+            {
+                try
+                {
+                    if (!sharedBrowser.IsClosed)
+                    {
+                        await sharedBrowser.CloseAsync();
+                    }
+                    await sharedBrowser.DisposeAsync();
+                    _activeBrowsers.TryTake(out _);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing shared browser");
+                }
+            }
+        }
+    }
+
+    private async Task<PinterestResult> ScrapePinterestWithBrowserAsync(IBrowser browser, string searchQuery, int imageCount = 20, bool downloadImages = false)
+    {
+        try
+        {
+            _logger.LogInformation("Scraping Pinterest for query: {Query}", searchQuery);
+
+            await using var page = await browser.NewPageAsync();
+            
+            // Load cached cookies if available
+            if (_pinterestCookies != null && DateTime.UtcNow < _cookiesExpiry)
+            {
+                await page.SetCookieAsync(_pinterestCookies);
+            }
+            
+            // Set user agent to avoid detection
+            await page.SetUserAgentAsync("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            
+            // Set viewport
+            await page.SetViewportAsync(new ViewPortOptions
+            {
+                Width = 1920,
+                Height = 1080
+            });
+
+            // Navigate to Pinterest search
+            var searchUrl = $"https://www.pinterest.com/search/pins/?q={Uri.EscapeDataString(searchQuery)}";
+            await page.GoToAsync(searchUrl, new NavigationOptions
+            {
+                WaitUntil = new[] { WaitUntilNavigation.Networkidle0 },
+                Timeout = 60000
+            });
+
+            _logger.LogInformation("Page loaded, waiting for images...");
+
+            // Wait for initial images to load
+            await page.WaitForSelectorAsync("img", new WaitForSelectorOptions { Timeout = 30000 });
+            
+            // Give it a moment to load
+            await Task.Delay(3000);
+
+            var images = new List<PinterestImage>();
+            var scrollAttempts = 0;
+            var maxScrollAttempts = Math.Max(20, (imageCount / 3) + 5);
+
+            while (images.Count < imageCount * 2 && scrollAttempts < maxScrollAttempts)
+            {
+                // Extract image data with higher quality URLs
+                var imageData = await page.EvaluateFunctionAsync<List<Dictionary<string, string>>>(@"
+                    () => {
+                        const images = [];
+                        const imgElements = document.querySelectorAll('img[src*=""pinimg""]');
+                        
+                        imgElements.forEach(img => {
+                            if (img.src && img.src.includes('pinimg')) {
+                                const parent = img.closest('a');
+                                const altText = img.alt || '';
+                                
+                                let highResUrl = img.src;
+                                
+                                if (highResUrl.includes('/236x/')) {
+                                    highResUrl = highResUrl.replace('/236x/', '/originals/');
+                                } else if (highResUrl.includes('/474x/')) {
+                                    highResUrl = highResUrl.replace('/474x/', '/originals/');
+                                } else if (highResUrl.includes('/736x/')) {
+                                    highResUrl = highResUrl.replace('/736x/', '/originals/');
+                                }
+                                
+                                const width = img.naturalWidth || 0;
+                                const height = img.naturalHeight || 0;
+                                
+                                images.push({
+                                    imageUrl: highResUrl,
+                                    title: altText,
+                                    sourceUrl: parent ? parent.href : '',
+                                    width: width.toString(),
+                                    height: height.toString()
+                                });
+                            }
+                        });
+                        
+                        return images;
+                    }
+                ");
+
+                _logger.LogInformation("Found {Count} images so far", imageData?.Count ?? 0);
+
+                if (imageData != null)
+                {
+                    foreach (var data in imageData)
+                    {
+                        var imageUrl = data.TryGetValue("imageUrl", out var url) ? url : "";
+                        
+                        if (string.IsNullOrEmpty(imageUrl) || images.Any(i => i.ImageUrl == imageUrl))
+                            continue;
+
+                        var width = data.TryGetValue("width", out var widthStr) && int.TryParse(widthStr, out var w) ? w : 0;
+                        var height = data.TryGetValue("height", out var heightStr) && int.TryParse(heightStr, out var h) ? h : 0;
+
+                        var quality = "Unknown";
+                        if (imageUrl.Contains("/originals/"))
+                        {
+                            quality = "Original (Highest Quality)";
+                        }
+                        else if (imageUrl.Contains("/736x/"))
+                        {
+                            quality = "High (736px)";
+                        }
+                        else if (imageUrl.Contains("/474x/"))
+                        {
+                            quality = "Medium (474px)";
+                        }
+                        else if (imageUrl.Contains("/236x/"))
+                        {
+                            quality = "Low (236px)";
+                        }
+
+                        var isAcceptableQuality = width >= 474 || width == 0 || imageUrl.Contains("/originals/") || imageUrl.Contains("/736x/");
+                        
+                        if (!isAcceptableQuality)
+                        {
+                            _logger.LogDebug("Skipping low quality image: {Width}x{Height}", width, height);
+                            continue;
+                        }
+
+                        images.Add(new PinterestImage
+                        {
+                            ImageUrl = imageUrl,
+                            Title = data.TryGetValue("title", out var title) ? title : "",
+                            SourceUrl = data.TryGetValue("sourceUrl", out var sourceUrl) ? sourceUrl : null,
+                            Width = width,
+                            Height = height,
+                            Quality = quality
+                        });
+                    }
+                }
+
+                await page.EvaluateFunctionAsync("() => window.scrollBy(0, window.innerHeight)");
+                await Task.Delay(1500);
+                scrollAttempts++;
+            }
+
+            _logger.LogInformation("Successfully scraped {Count} images from Pinterest", images.Count);
+
+            var sortedImages = images
+                .OrderByDescending(img => img.ImageUrl.Contains("/originals/") ? 2 : 0)
+                .ThenByDescending(img => img.Width * img.Height)
+                .ThenByDescending(img => Math.Min(img.Width, img.Height))
+                .ToList();
+
+            var finalImages = sortedImages.Take(imageCount).ToList();
+            _logger.LogInformation("Selected top {Count} highest quality images", finalImages.Count);
+
+            if (downloadImages)
+            {
+                _logger.LogInformation("Downloading {Count} images locally...", finalImages.Count);
+                
+                for (int i = 0; i < finalImages.Count; i++)
+                {
+                    var image = finalImages[i];
+                    var localPath = await _imageDownloadService.DownloadImageAsync(image.ImageUrl, searchQuery, i + 1);
+                    
+                    string? localUrl = null;
+                    if (localPath != null)
+                    {
+                        var fileName = Path.GetFileName(localPath);
+                        localUrl = $"/images/{fileName}";
+                    }
+                    
+                    finalImages[i] = image with 
+                    { 
+                        ImageUrl = localUrl ?? image.ImageUrl,
+                        LocalFilePath = localPath,
+                        Downloaded = localPath != null
+                    };
+                }
+                
+                _logger.LogInformation("Downloaded {Count} images successfully", finalImages.Count(i => i.Downloaded));
+            }
+
+            return new PinterestResult
+            {
+                SearchQuery = searchQuery,
+                Images = finalImages,
+                ImageCount = finalImages.Count,
+                Success = true,
+                ScrapedAt = DateTime.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error scraping Pinterest for query: {Query}", searchQuery);
+            return new PinterestResult
+            {
+                SearchQuery = searchQuery,
                 Success = false,
                 Error = ex.Message,
                 ScrapedAt = DateTime.UtcNow

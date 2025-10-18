@@ -146,6 +146,8 @@ export default function ImageResults({ results }) {
 function ImageSection({ queryResult, index, selectedImages, onSelectionChange }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   const toggleSelection = (image) => {
     const isSelected = selectedImages.some((img) => img.imageUrl === image.imageUrl);
@@ -162,6 +164,44 @@ function ImageSection({ queryResult, index, selectedImages, onSelectionChange })
 
   const isSelected = (image) => {
     return selectedImages.some((img) => img.imageUrl === image.imageUrl);
+  };
+
+  const handlePreviewCollage = async () => {
+    if (selectedImages.length !== 4) return;
+
+    setIsPreviewing(true);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5228';
+      const response = await fetch(`${apiUrl}/api/scraper/collage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imagePaths: selectedImages.map((img) => img.imageUrl),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate preview');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      setPreviewUrl(url);
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      alert('Failed to generate preview. Please try again.');
+      setIsPreviewing(false);
+    }
+  };
+
+  const closePreview = () => {
+    if (previewUrl) {
+      window.URL.revokeObjectURL(previewUrl);
+    }
+    setPreviewUrl(null);
+    setIsPreviewing(false);
   };
 
   const handleGenerateCollage = async () => {
@@ -197,6 +237,9 @@ function ImageSection({ queryResult, index, selectedImages, onSelectionChange })
 
       // Clear selection after successful generation
       onSelectionChange([]);
+      
+      // Close preview if open
+      closePreview();
     } catch (error) {
       console.error('Error generating collage:', error);
       alert('Failed to generate collage. Please try again.');
@@ -219,14 +262,23 @@ function ImageSection({ queryResult, index, selectedImages, onSelectionChange })
             </h2>
           </div>
           
-          {/* Generate Collage Button */}
-          <button
-            onClick={handleGenerateCollage}
-            disabled={selectedImages.length !== 4 || isGenerating}
-            className="px-4 py-2 bg-white text-black font-medium rounded-lg transition-colors hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-          >
-            {isGenerating ? 'Generating...' : `Generate Collage (${selectedImages.length}/4)`}
-          </button>
+          {/* Preview and Generate Buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePreviewCollage}
+              disabled={selectedImages.length !== 4 || isPreviewing}
+              className="px-4 py-2 bg-neutral-800 text-white font-medium rounded-lg transition-colors hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm border border-neutral-700"
+            >
+              {isPreviewing ? 'Loading...' : '👁️ Preview'}
+            </button>
+            <button
+              onClick={handleGenerateCollage}
+              disabled={selectedImages.length !== 4 || isGenerating}
+              className="px-4 py-2 bg-white text-black font-medium rounded-lg transition-colors hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              {isGenerating ? 'Generating...' : `Generate (${selectedImages.length}/4)`}
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-4 text-xs text-neutral-400">
           <span className="flex items-center gap-2">
@@ -287,6 +339,17 @@ function ImageSection({ queryResult, index, selectedImages, onSelectionChange })
           onToggleSelect={() => toggleSelection(selectedImage)}
           selectionOrder={selectedImages.findIndex(img => img.imageUrl === selectedImage.imageUrl) + 1}
           canSelect={selectedImages.length < 4 || isSelected(selectedImage)}
+        />
+      )}
+
+      {/* Preview Modal */}
+      {previewUrl && (
+        <CollagePreviewModal
+          previewUrl={previewUrl}
+          onClose={closePreview}
+          onGenerate={handleGenerateCollage}
+          isGenerating={isGenerating}
+          queryName={queryResult.query}
         />
       )}
     </div>
@@ -507,3 +570,88 @@ function ImageModal({ image, images, onClose, onNext, onPrevious, onToggleSelect
   );
 }
 
+function CollagePreviewModal({ previewUrl, onClose, onGenerate, isGenerating, queryName }) {
+  // Handle keyboard listener for Escape
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="relative w-full max-w-lg">
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          className="absolute -top-12 right-0 text-neutral-400 hover:text-white transition-colors z-10"
+        >
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* Title */}
+        <div className="absolute -top-12 left-0 text-white">
+          <h3 className="text-lg font-semibold mb-1">Collage Preview</h3>
+          <p className="text-sm text-neutral-400">{queryName}</p>
+        </div>
+
+        {/* Preview Image - 9:16 Aspect Ratio */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden">
+          <div className="relative w-full" style={{ aspectRatio: '9/16' }}>
+            <img
+              src={previewUrl}
+              alt="Collage preview"
+              className="absolute inset-0 w-full h-full object-cover bg-neutral-950"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          
+          {/* Action Buttons */}
+          <div className="p-6 bg-neutral-900 flex flex-col gap-4">
+            <p className="text-neutral-400 text-sm text-center">
+              9:16 Portrait Format • Perfect for Instagram Stories
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+                className="flex-1 px-5 py-2.5 bg-neutral-800 text-white font-medium rounded-lg transition-colors hover:bg-neutral-700 text-sm border border-neutral-700"
+              >
+                Close
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGenerate();
+                }}
+                disabled={isGenerating}
+                className="flex-1 px-5 py-2.5 bg-white text-black font-medium rounded-lg transition-colors hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+              >
+                {isGenerating ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
+                    Generating...
+                  </span>
+                ) : (
+                  '📥 Download'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
