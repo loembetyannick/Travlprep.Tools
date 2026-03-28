@@ -52,6 +52,24 @@ body {
   border-radius: 12px;
 }
 
+/* TikTok-style location label */
+.tiktok-label {
+  font-family: "Proxima Nova", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    -1px -1px 0 rgba(0, 0, 0, 0.7),
+     1px -1px 0 rgba(0, 0, 0, 0.7),
+    -1px  1px 0 rgba(0, 0, 0, 0.7),
+     1px  1px 0 rgba(0, 0, 0, 0.7),
+     0    2px 4px rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+}
+
+.tiktok-label.no-shadow {
+  text-shadow: none;
+}
+
 /* Custom Scrollbar Styles */
 ::-webkit-scrollbar {
   width: 8px;

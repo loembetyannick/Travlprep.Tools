@@ -1,4 +1,4 @@
-export async function generateCollageCanvas(images) {
+export async function generateCollageCanvas(images, label, showShadow = true) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   const width = 1080;
@@ -43,11 +43,41 @@ export async function generateCollageCanvas(images) {
     ctx.drawImage(img, sx, sy, sw, sh, x, y, cellW, cellH);
   }
 
+  if (label) {
+    const pin = '📍';
+    const text = formatLabel(label);
+    const fontSize = 40;
+    ctx.font = `700 ${fontSize}px "Proxima Nova", "Helvetica Neue", Arial, sans-serif`;
+    ctx.textBaseline = 'middle';
+    const textY = height * 0.44;
+
+    const pinWidth = ctx.measureText(pin).width;
+    const textWidth = ctx.measureText(text).width;
+    const totalWidth = pinWidth + textWidth;
+    const startX = (width - totalWidth) / 2;
+
+    // Draw emoji without shadow
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(pin, startX, textY);
+
+    // Draw text with optional shadow
+    const textX = startX + pinWidth;
+    if (showShadow) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.lineWidth = 5;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(text, textX, textY);
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(text, textX, textY);
+  }
+
   return canvas;
 }
 
-export async function downloadCollage(collage) {
-  const canvas = await generateCollageCanvas(collage.images);
+export async function downloadCollage(collage, showShadow = true) {
+  const canvas = await generateCollageCanvas(collage.images, collage.name, showShadow);
   const blob = await new Promise((resolve) =>
     canvas.toBlob(resolve, 'image/jpeg', 0.92)
   );
@@ -61,22 +91,27 @@ export async function downloadCollage(collage) {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadAllCollages(collages) {
+export async function downloadAllCollages(collages, showShadow = true) {
   for (const collage of collages) {
-    await downloadCollage(collage);
+    await downloadCollage(collage, showShadow);
     await new Promise((resolve) => setTimeout(resolve, 350));
   }
 }
 
+export function formatLabel(name) {
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
+
 export function parseFilename(filename) {
+  // Remove extension, then strip macOS duplicate suffixes like " 2", " (1)", " copy"
   const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
-  const parts = nameWithoutExt.split('_');
+  const cleaned = nameWithoutExt.replace(/\s+(\(\d+\)|\d+|copy.*)$/i, '');
+  const parts = cleaned.split('_');
 
   if (parts.length < 2) return null;
 
   const lastPart = parts[parts.length - 1];
 
-  // Match "01-04" (sequence-total) or plain "01" (sequence only)
   const fullMatch = lastPart.match(/^(\d+)-(\d+)$/);
   const plainMatch = lastPart.match(/^(\d+)$/);
 

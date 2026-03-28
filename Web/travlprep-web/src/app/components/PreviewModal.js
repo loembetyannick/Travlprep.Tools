@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { downloadCollage } from '../utils';
+import { downloadCollage, formatLabel } from '../utils';
 
 export default function PreviewModal({ collage, onClose }) {
   const [isDownloading, setIsDownloading] = useState(false);
@@ -9,6 +9,9 @@ export default function PreviewModal({ collage, onClose }) {
   const sorted = [...collage.images].sort(
     (a, b) => a.sequenceNum - b.sequenceNum
   );
+
+  const showShadow = collage.showShadow ?? true;
+  const label = formatLabel(collage.name);
 
   const handleKeyDown = useCallback(
     (e) => {
@@ -32,7 +35,7 @@ export default function PreviewModal({ collage, onClose }) {
   const handleDownload = async () => {
     setIsDownloading(true);
     try {
-      await downloadCollage(collage);
+      await downloadCollage(collage, showShadow);
     } catch (err) {
       console.error('Download failed:', err);
     } finally {
@@ -74,22 +77,31 @@ export default function PreviewModal({ collage, onClose }) {
           className="bg-neutral-900 border border-neutral-800 rounded-lg overflow-hidden"
           style={{ width: '280px' }}
         >
-          <div className="grid grid-cols-2" style={{ aspectRatio: '9/16' }}>
-            {sorted.slice(0, 4).map((image, i) => (
-              <div key={i} className="bg-neutral-800 overflow-hidden">
-                <img
-                  src={image.url}
-                  alt={image.filename}
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            ))}
+          <div className="relative" style={{ aspectRatio: '9/16' }}>
+            <div className="absolute inset-0 grid grid-cols-2 grid-rows-2">
+              {sorted.slice(0, 4).map((image, i) => (
+                <div key={i} className="relative bg-neutral-800 overflow-hidden">
+                  <img
+                    src={image.url}
+                    alt={image.filename}
+                    className="absolute inset-0 w-full h-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+            {/* Location label */}
+            <div className="absolute inset-x-0 flex justify-center items-center pointer-events-none" style={{ top: '44%' }}>
+              <span className="text-sm">📍</span>
+              <span className={`tiktok-label text-sm ${showShadow ? '' : 'no-shadow'}`}>
+                {label}
+              </span>
+            </div>
           </div>
 
           {/* Title + Download */}
           <div className="p-3 flex items-center justify-between">
-            <p className="text-white text-sm font-medium capitalize truncate">
-              {collage.name}
+            <p className="text-white text-sm font-medium truncate">
+              {label}
             </p>
             <button
               onClick={handleDownload}
