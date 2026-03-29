@@ -18,83 +18,137 @@ export async function generateCollageCanvas(images, label, showShadow = true) {
   const sorted = [...images].sort((a, b) => a.sequenceNum - b.sequenceNum);
 
   for (let i = 0; i < Math.min(4, sorted.length); i++) {
-    const img = new Image();
-    img.src = sorted[i].url;
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-    });
-
+    const img = await loadImage(sorted[i].url);
     const [x, y] = positions[i];
-    const cellAspect = cellW / cellH;
-    const imgAspect = img.width / img.height;
-    let sx, sy, sw, sh;
-    if (imgAspect > cellAspect) {
-      sh = img.height;
-      sw = img.height * cellAspect;
-      sx = (img.width - sw) / 2;
-      sy = 0;
-    } else {
-      sw = img.width;
-      sh = img.width / cellAspect;
-      sx = 0;
-      sy = (img.height - sh) / 2;
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, x, y, cellW, cellH);
+    drawCoverFit(ctx, img, x, y, cellW, cellH);
   }
 
-  if (label) {
-    const pin = '📍';
-    const text = formatLabel(label);
-    const fontSize = 40;
-    ctx.font = `700 ${fontSize}px "Proxima Nova", "Helvetica Neue", Arial, sans-serif`;
-    ctx.textBaseline = 'middle';
-    const textY = height * 0.44;
-
-    const pinWidth = ctx.measureText(pin).width;
-    const textWidth = ctx.measureText(text).width;
-    const totalWidth = pinWidth + textWidth;
-    const startX = (width - totalWidth) / 2;
-
-    // Draw emoji without shadow
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(pin, startX, textY);
-
-    // Draw text with optional shadow
-    const textX = startX + pinWidth;
-    if (showShadow) {
-      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-      ctx.lineWidth = 5;
-      ctx.lineJoin = 'round';
-      ctx.strokeText(text, textX, textY);
-    }
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(text, textX, textY);
-  }
+  if (label) drawLabel(ctx, label, width, height, showShadow);
 
   return canvas;
 }
 
-export async function downloadCollage(collage, showShadow = true) {
-  const canvas = await generateCollageCanvas(collage.images, collage.name, showShadow);
-  const blob = await new Promise((resolve) =>
-    canvas.toBlob(resolve, 'image/jpeg', 0.92)
-  );
+export async function generateCoverCanvas(imageUrl, label, showShadow = true) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const width = 1080;
+  const height = 1920;
+  canvas.width = width;
+  canvas.height = height;
+
+  const img = await loadImage(imageUrl);
+  drawCoverFit(ctx, img, 0, 0, width, height);
+
+  if (label) drawLabel(ctx, label, width, height, showShadow);
+
+  return canvas;
+}
+
+function drawCoverFit(ctx, img, x, y, w, h) {
+  const cellAspect = w / h;
+  const imgAspect = img.width / img.height;
+  let sx, sy, sw, sh;
+  if (imgAspect > cellAspect) {
+    sh = img.height;
+    sw = img.height * cellAspect;
+    sx = (img.width - sw) / 2;
+    sy = 0;
+  } else {
+    sw = img.width;
+    sh = img.width / cellAspect;
+    sx = 0;
+    sy = (img.height - sh) / 2;
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+
+function drawLabel(ctx, label, width, height, showShadow) {
+  const pin = '📍';
+  const text = formatLabel(label);
+  const fontSize = 40;
+  ctx.font = `700 ${fontSize}px "Proxima Nova", "Helvetica Neue", Arial, sans-serif`;
+  ctx.textBaseline = 'middle';
+  const textY = height * 0.44;
+
+  const pinWidth = ctx.measureText(pin).width;
+  const textWidth = ctx.measureText(text).width;
+  const totalWidth = pinWidth + textWidth;
+  const startX = (width - totalWidth) / 2;
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(pin, startX, textY);
+
+  const textX = startX + pinWidth;
+  if (showShadow) {
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(text, textX, textY);
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, textX, textY);
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function canvasToBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+}
+
+function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${collage.collageKey}_collage.jpg`;
+  a.download = filename;
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 200);
 }
 
-export async function downloadAllCollages(collages, showShadow = true) {
+export async function downloadCollage(collage, showShadow = true) {
+  const canvas = await generateCollageCanvas(collage.images, collage.name, showShadow);
+  const blob = await canvasToBlob(canvas);
+  triggerDownload(blob, `${collage.collageKey}_collage.jpg`);
+}
+
+export async function downloadCover(imageUrl, name, collageKey, showShadow = true) {
+  const canvas = await generateCoverCanvas(imageUrl, name, showShadow);
+  const blob = await canvasToBlob(canvas);
+  triggerDownload(blob, `${collageKey}_cover.jpg`);
+}
+
+export async function downloadAllInRow(collages, coverImages, showShadow = true) {
+  const blobs = [];
+
+  for (const cover of coverImages) {
+    const canvas = await generateCoverCanvas(cover.url, cover.label, showShadow);
+    const blob = await canvasToBlob(canvas);
+    blobs.push({ blob, filename: `${cover.collageKey}_cover.jpg` });
+  }
+
   for (const collage of collages) {
-    await downloadCollage(collage, showShadow);
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    const canvas = await generateCollageCanvas(collage.images, collage.name, showShadow);
+    const blob = await canvasToBlob(canvas);
+    blobs.push({ blob, filename: `${collage.collageKey}_collage.jpg` });
+  }
+
+  for (let i = 0; i < blobs.length; i++) {
+    triggerDownload(blobs[i].blob, blobs[i].filename);
+    if (i < blobs.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
   }
 }
 
@@ -103,7 +157,6 @@ export function formatLabel(name) {
 }
 
 export function parseFilename(filename) {
-  // Remove extension, then strip macOS duplicate suffixes like " 2", " (1)", " copy"
   const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
   const cleaned = nameWithoutExt.replace(/\s+(\(\d+\)|\d+|copy.*)$/i, '');
   const parts = cleaned.split('_');
