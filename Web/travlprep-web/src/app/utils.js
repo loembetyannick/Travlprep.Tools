@@ -123,8 +123,8 @@ export async function downloadCollage(collage, showShadow = true) {
   triggerDownload(blob, `${collage.collageKey}_collage.jpg`);
 }
 
-export async function downloadCover(imageUrl, name, collageKey, showShadow = true) {
-  const canvas = await generateCoverCanvas(imageUrl, name, showShadow);
+export async function downloadCover(imageUrl, collageKey) {
+  const canvas = await generateCoverCanvas(imageUrl, null, false);
   const blob = await canvasToBlob(canvas);
   triggerDownload(blob, `${collageKey}_cover.jpg`);
 }
@@ -133,7 +133,7 @@ export async function downloadAllInRow(collages, coverImages, showShadow = true)
   const blobs = [];
 
   for (const cover of coverImages) {
-    const canvas = await generateCoverCanvas(cover.url, cover.label, showShadow);
+    const canvas = await generateCoverCanvas(cover.url, null, false);
     const blob = await canvasToBlob(canvas);
     blobs.push({ blob, filename: `${cover.collageKey}_cover.jpg` });
   }

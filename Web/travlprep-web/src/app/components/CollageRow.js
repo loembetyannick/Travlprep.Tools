@@ -62,7 +62,7 @@ export default function CollageRow({ row, onPreview, onRemove }) {
   const handleDownloadCover = async (cover) => {
     setDownloadingId(`cover-${cover.url}`);
     try {
-      await downloadCover(cover.url, cover.label, cover.collageKey, showShadow);
+      await downloadCover(cover.url, cover.collageKey);
     } catch (err) {
       console.error('Cover download failed:', err);
     } finally {
@@ -201,10 +201,6 @@ function CoverCard({ cover, showShadow, onDownload, onRemove, isDownloading }) {
           alt={cover.filename}
           className="absolute inset-0 w-full h-full object-cover"
         />
-        {/* Cover badge */}
-        <div className="absolute top-2 left-2 px-2 py-0.5 bg-white text-black text-[10px] font-bold rounded-full uppercase tracking-wide">
-          Cover
-        </div>
         {/* Remove cover */}
         <button
           onClick={onRemove}
@@ -214,16 +210,6 @@ function CoverCard({ cover, showShadow, onDownload, onRemove, isDownloading }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
-        {/* Location label */}
-        <div
-          className="absolute inset-x-0 flex justify-center items-center pointer-events-none"
-          style={{ top: '44%' }}
-        >
-          <span className="text-xs">📍</span>
-          <span className={`tiktok-label text-xs ${showShadow ? '' : 'no-shadow'}`}>
-            {label}
-          </span>
-        </div>
       </div>
 
       <div className="mt-3 flex items-center justify-between">
@@ -290,7 +276,7 @@ function CollageCard({
                   e.stopPropagation();
                   onSetCover(image);
                 }}
-                className={`absolute bottom-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all text-[10px] ${
+                className={`absolute top-1 right-1 w-6 h-6 rounded-full flex items-center justify-center transition-all text-[10px] ${
                   isCover(image)
                     ? 'bg-white text-black opacity-100'
                     : 'bg-black/50 text-white opacity-0 group-hover:opacity-100 hover:bg-black/70'
